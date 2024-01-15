@@ -12,7 +12,7 @@ import numpy
 import orjson
 from rouge import Rouge
 from sacrebleu.metrics import BLEU
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import CrossEncoder, SentenceTransformer
 from sklearn.metrics import (
     mean_squared_error,
     r2_score,
@@ -47,6 +47,7 @@ import threading
 
 __cache_transformer_by_model_id = {}
 __cache_sentence_transformer_by_name = {}
+__cache_cross_encoder_by_name = {}
 __cache_transform_pipeline_by_task = {}
 
 DTYPE_MAP = {
@@ -495,6 +496,18 @@ def embed(transformer, inputs, kwargs):
 
     return embed_using(model, transformer, inputs, kwargs)
 
+
+def crossenc(transformer, query, passages, model_kwargs, predict_kwargs):
+    model_kwargs = orjson.loads(model_kwargs)
+    predict_kwargs = orjson.loads(predict_kwargs)
+
+    ensure_device(model_kwargs)
+
+    if transformer not in __cache_cross_encoder_by_name:
+        __cache_cross_encoder_by_name[transformer] = CrossEncoder(transformer, **model_kwargs)
+    model = __cache_cross_encoder_by_name[transformer]
+
+    return model.predict([(query, p) for p in passages], **predict_kwargs)
 
 
 def clear_gpu_cache(memory_usage: None):

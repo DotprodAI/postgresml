@@ -577,6 +577,23 @@ pub fn embed_batch(transformer: &str, inputs: Vec<&str>, kwargs: default!(JsonB,
     }
 }
 
+#[cfg(all(feature = "python", not(feature = "use_as_lib")))]
+#[pg_extern(immutable, parallel_safe, name = "crossenc")]
+pub fn crossenc(transformer: &str, query: &str, passage: &str, model_kwargs: default!(JsonB, "'{}'"), predict_kwargs: default!(JsonB, "'{}'")) -> f32 {
+    *(crossenc_batch(transformer, query, Vec::from([passage]), model_kwargs, predict_kwargs)
+        .first()
+        .unwrap())
+}
+
+#[cfg(all(feature = "python", not(feature = "use_as_lib")))]
+#[pg_extern(immutable, parallel_safe, name = "crossenc")]
+pub fn crossenc_batch(transformer: &str, query: &str, passages: Vec<&str>, model_kwargs: default!(JsonB, "'{}'"), predict_kwargs: default!(JsonB, "'{}'")) -> Vec<f32> {
+    match crate::bindings::transformers::crossenc(transformer, query, passages, &model_kwargs.0, &predict_kwargs.0) {
+        Ok(output) => output,
+        Err(e) => error!("{e}"),
+    }
+}
+
 /// Clears the GPU cache.
 ///
 /// # Arguments
