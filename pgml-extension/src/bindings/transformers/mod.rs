@@ -80,6 +80,28 @@ pub fn crossenc(transformer: &str, query: &str, passages: Vec<&str>, model_kwarg
     })
 }
 
+pub fn sparse_embed(model_name: &str, inputs: Vec<&str>, kwargs: &serde_json::Value) -> Result<Vec<Vec<f32>>> {
+    let kwargs = serde_json::to_string(kwargs)?;
+    Python::with_gil(|py| -> Result<Vec<Vec<f32>>> {
+        let sparse_embed: Py<PyAny> = get_module!(PY_MODULE).getattr(py, "sparse_embed").format_traceback(py)?;
+        let output = sparse_embed
+            .call1(
+                py,
+                PyTuple::new(
+                    py,
+                    &[
+                        model_name.to_string().into_py(py),
+                        inputs.into_py(py),
+                        kwargs.into_py(py),
+                    ],
+                ),
+            )
+            .format_traceback(py)?;
+
+        output.extract(py).format_traceback(py)
+    })
+}
+
 pub fn tune(task: &Task, dataset: TextDataset, hyperparams: &JsonB, path: &Path) -> Result<HashMap<String, f64>> {
     let task = task.to_string();
     let hyperparams = serde_json::to_string(&hyperparams.0)?;

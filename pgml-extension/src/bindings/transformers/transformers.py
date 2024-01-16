@@ -5,6 +5,7 @@ import time
 import queue
 import sys
 import json
+from typing import List, Optional, Union
 
 import datasets
 from InstructorEmbedding import INSTRUCTOR
@@ -28,6 +29,7 @@ from tqdm import tqdm
 import transformers
 from transformers import (
     AutoModelForCausalLM,
+    AutoModelForMaskedLM,
     AutoModelForQuestionAnswering,
     AutoModelForSeq2SeqLM,
     AutoModelForSequenceClassification,
@@ -48,6 +50,7 @@ import threading
 __cache_transformer_by_model_id = {}
 __cache_sentence_transformer_by_name = {}
 __cache_cross_encoder_by_name = {}
+__cache_splade_encoder_by_name = {}
 __cache_transform_pipeline_by_task = {}
 
 DTYPE_MAP = {
@@ -508,6 +511,77 @@ def crossenc(transformer, query, passages, model_kwargs, predict_kwargs):
     model = __cache_cross_encoder_by_name[transformer]
 
     return model.predict([(query, p) for p in passages], **predict_kwargs)
+
+
+class SpladeEncoder(object):
+    """
+    SPLADE sparse vector encoder, inpired by Pinecone implementation.
+
+    TODO: move this implementation into our own Python library.
+    """
+
+    def __init__(
+            self,
+            model_name: str,
+            max_seq_length: int = 256,
+            device: Optional[str] = None
+        ):
+        """
+        Args:
+            model_name: Name for the document encoder on Hugging-Face.
+            max_seq_length: Maximum sequence length for the model. Must be between 1 and 512.
+            device: Device to use for inference. Defaults to GPU if available, otherwise CPU.
+        """
+        if not 0 < max_seq_length <= 512:
+            raise ValueError("max_seq_length must be between 1 and 512")
+
+        device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = device
+        self.max_seq_length = max_seq_length
+
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.encoder = AutoModelForMaskedLM.from_pretrained(model_name).to(self.device)
+        self.encoder.eval()
+
+    def encode(
+            self,
+            texts: Union[str, List[str]]
+        ) -> torch.Tensor:
+        """
+        Args:
+            texts: single or list of texts to encode.
+
+        Returns a list of Splade sparse vectors, one for each input text.
+        """
+        inputs = self.tokenizer(
+            texts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=self.max_seq_length,
+        ).to(self.device)
+        with torch.inference_mode():
+            logits = self.encoder(**inputs).logits
+
+        x = torch.log1p(torch.relu(logits))
+        output, _ = torch.max(x * inputs['attention_mask'].unsqueeze(-1), dim=1)
+
+        output = output.detach()
+        # TODO: should we normalize output for a correct inner-product op with pg_sparse?
+        #output = output / (torch.norm(output, dim=-1, keepdim=True) + 1e-9)
+        return output.cpu().numpy()
+
+
+def sparse_embed(model_name, inputs, kwargs):
+    kwargs = orjson.loads(kwargs)
+
+    ensure_device(kwargs)
+
+    if model_name not in __cache_splade_encoder_by_name:
+        __cache_splade_encoder_by_name[model_name] = SpladeEncoder(model_name, **kwargs)
+    model = __cache_splade_encoder_by_name[model_name]
+
+    return model.encode(inputs)
 
 
 def clear_gpu_cache(memory_usage: None):

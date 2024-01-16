@@ -594,6 +594,24 @@ pub fn crossenc_batch(transformer: &str, query: &str, passages: Vec<&str>, model
     }
 }
 
+#[cfg(all(feature = "python", not(feature = "use_as_lib")))]
+#[pg_extern(immutable, parallel_safe, name = "sparse_embed")]
+pub fn sparse_embed(model_name: &str, text: &str, kwargs: default!(JsonB, "'{}'")) -> Vec<f32> {
+    sparse_embed_batch(model_name, Vec::from([text]), kwargs)
+        .first()
+        .unwrap()
+        .to_vec()
+}
+
+#[cfg(all(feature = "python", not(feature = "use_as_lib")))]
+#[pg_extern(immutable, parallel_safe, name = "sparse_embed")]
+pub fn sparse_embed_batch(model_name: &str, inputs: Vec<&str>, kwargs: default!(JsonB, "'{}'")) -> Vec<Vec<f32>> {
+    match crate::bindings::transformers::sparse_embed(model_name, inputs, &kwargs.0) {
+        Ok(output) => output,
+        Err(e) => error!("{e}"),
+    }
+}
+
 /// Clears the GPU cache.
 ///
 /// # Arguments
